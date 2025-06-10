@@ -2,30 +2,24 @@ import { execSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-type PackageJson = { version: string };
-
-const pkg: PackageJson = JSON.parse(
+const pkg = JSON.parse(
   readFileSync(join(__dirname, "..", "package.json"), "utf8"),
+) as { version: string };
+
+let commit: string | undefined;
+try {
+  commit = execSync("git rev-parse --short=9 HEAD", { stdio: ["ignore", "pipe", "ignore"] })
+    .toString()
+    .trim();
+} catch { /* ignored */ }
+
+if (!commit && process.env.npm_package_gitHead) {
+  commit = process.env.npm_package_gitHead.slice(0, 9);
+}
+
+const fullVersion = `${pkg.version}+${commit ?? "unknown"}` as const;
+
+writeFileSync(
+  join(__dirname, "..", "lib", "version.ts"),
+  `// AUTO-GENERATED – do not edit\nexport const STAGEHAND_VERSION = "${fullVersion}" as const;\n`,
 );
-
-const commit = (() => {
-  try {
-    // full 40-char hash so it’s unambiguous
-    return execSync("git rev-parse HEAD").toString().trim();
-  } catch {
-    // happens only when building from a git-archive tarball that has no .git
-    return "unknown";
-  }
-})();
-
-const fullVersion = `${pkg.version}+${commit}` as const;
-
-const banner = `/**
- * ⚠️  AUTO-GENERATED — DO NOT EDIT BY HAND
- *  Run \`pnpm run gen-version\` to refresh.
- */
-export const STAGEHAND_VERSION = "${fullVersion}" as const;
-`;
-
-writeFileSync(join(__dirname, "..", "lib", "version.ts"), banner);
-console.log(`Generated Stagehand version: ${fullVersion}`);
