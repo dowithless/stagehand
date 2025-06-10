@@ -8,12 +8,13 @@ import { fileURLToPath } from "node:url";
 import process from "node:process";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const root = path.resolve(__dirname, ".."); // package root
+const root = path.resolve(__dirname, "..");   // package root
 
 await fs.mkdir(path.join(root, "lib"), { recursive: true });
 
-const pkgPath = path.join(root, "package.json");
-const pkg = JSON.parse(await fs.readFile(pkgPath, "utf8"));
+const pkg = JSON.parse(
+  await fs.readFile(path.join(root, "package.json"), "utf8"),
+);
 
 let branch = "";
 let sha = "";
@@ -22,34 +23,35 @@ try {
   branch = execSync("git rev-parse --abbrev-ref HEAD", { cwd: root })
     .toString()
     .trim();
-  sha = execSync("git rev-parse --short HEAD", { cwd: root }).toString().trim();
+  sha = execSync("git rev-parse --short HEAD", { cwd: root })
+    .toString()
+    .trim();
 } catch {}
-
-if (!sha && typeof pkg.gitHead === "string") {
-  sha = pkg.gitHead.slice(0, 7);
-}
 
 if (!sha) {
   sha =
-    process.env.npm_config_git_head || process.env.npm_package_gitHead || "";
+    process.env.npm_config_git_head ||
+    process.env.npm_package_gitHead ||
+    (typeof pkg.gitHead === "string" ? pkg.gitHead.slice(0, 7) : "");
 }
 if (!branch) {
   branch =
-    process.env.npm_config_git_committish ||
-    process.env.npm_config_git_tag ||
+    process.env.npm_config_git_committish ||   // branch / tag
+    process.env.npm_config_git_tag ||          // tag
     "";
 }
 
-const fullVersion =
-  sha && branch && branch !== "HEAD"
-    ? `${pkg.version}-${branch}@${sha}`
-    : sha
-      ? `${pkg.version}@${sha}`
-      : pkg.version;
+let fullVersion = pkg.version;
+if (sha && branch && branch !== "HEAD") {
+  fullVersion = `${pkg.version}-${branch}@${sha}`;
+} else if (sha) {
+  fullVersion = `${pkg.version}@${sha}`;
+} else if (branch && branch !== "HEAD") {
+  fullVersion = `${pkg.version}-${branch}`;
+}
 
 const out = `/**
- * Auto-generated at build-time – DO NOT EDIT.
- * Always import via \`import { STAGEHAND_VERSION } from "./version.js"\`
+ * Auto-generated – DO NOT EDIT.
  */
 export const STAGEHAND_VERSION = "${fullVersion}" as const;
 `;
