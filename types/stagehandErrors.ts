@@ -1,4 +1,6 @@
 import { ZodError } from "zod";
+declare const __STAGEHAND_VERSION__: string;
+export const STAGEHAND_VERSION = __STAGEHAND_VERSION__;
 
 export class StagehandError extends Error {
   constructor(message: string) {
