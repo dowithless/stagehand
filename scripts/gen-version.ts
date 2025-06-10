@@ -8,10 +8,14 @@ const pkg = JSON.parse(
 
 let commit: string | undefined;
 try {
-  commit = execSync("git rev-parse --short=9 HEAD", { stdio: ["ignore", "pipe", "ignore"] })
+  commit = execSync("git rev-parse --short=9 HEAD", {
+    stdio: ["ignore", "pipe", "ignore"],
+  })
     .toString()
     .trim();
-} catch { /* ignored */ }
+} catch {
+  /* ignored */
+}
 
 if (!commit && process.env.npm_package_gitHead) {
   commit = process.env.npm_package_gitHead.slice(0, 9);
@@ -21,5 +25,10 @@ const fullVersion = `${pkg.version}+${commit ?? "unknown"}` as const;
 
 writeFileSync(
   join(__dirname, "..", "lib", "version.ts"),
-  `// AUTO-GENERATED – do not edit\nexport const STAGEHAND_VERSION = "${fullVersion}" as const;\n`,
+  `/**
+ * ⚠️  AUTO-GENERATED — DO NOT EDIT BY HAND
+ * Run \`pnpm run gen-version\` to refresh.
+ */
+export const STAGEHAND_VERSION = "${fullVersion}" as const;
+`,
 );
