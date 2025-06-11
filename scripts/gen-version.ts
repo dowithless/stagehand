@@ -1,33 +1,30 @@
+import { writeFileSync } from "node:fs";
 import { execSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-const pkgPath = join(__dirname, "..", "package.json");
-const pkgRaw = readFileSync(pkgPath, "utf8");
-const pkg = JSON.parse(pkgRaw) as { version: string; gitHead?: string };
+const pkgRaw = readFileSync(join(__dirname, "..", "package.json"), "utf8");
+const pkgJson = JSON.parse(pkgRaw) as { version: string };
 
-let commit: string | undefined = pkg.gitHead?.slice(0, 9);
-if (!commit && process.env.npm_package_gitHead) {
-  commit = process.env.npm_package_gitHead.slice(0, 9);
-}
-if (!commit) {
+/** Safely run a Git command and return trimmed output or undefined. */
+function git(cmd: string): string | undefined {
   try {
-    commit = execSync("git rev-parse --short=9 HEAD", {
-      stdio: ["ignore", "pipe", "ignore"],
-    })
-      .toString()
-      .trim();
-  } catch {/**/}
+    return execSync(cmd).toString().trim() || undefined;
+  } catch {
+    return undefined;
+  }
 }
 
-const fullVersion = `${pkg.version}+${commit ?? "unknown"}` as const;
+const version = pkgJson.version as string;
+const commit  = git("git rev-parse --short HEAD") ?? "unknown";
+const dirty   = git("git diff --quiet || echo dirty") ? "-dirty" : "";
 
-writeFileSync(
-  join(__dirname, "..", "lib", "version.ts"),
-  `/**
- * ⚠️  AUTO-GENERATED — DO NOT EDIT BY HAND
- * Run \`pnpm run gen-version\` to refresh.
- */
+const fullVersion = `${version}+${commit}${dirty}`;
+
+const file = `/** ⚠️ AUTO-GENERATED — do not edit */
 export const STAGEHAND_VERSION = "${fullVersion}" as const;
-`,
-);
+`;
+
+writeFileSync(resolve("lib/version.ts"), file);
+console.log(`🔖  STAGEHAND_VERSION → ${fullVersion}`);
