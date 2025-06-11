@@ -20,13 +20,17 @@
     "e2e:local": "pnpm run build && cd evals/deterministic && playwright test --config=local.playwright.config.ts",
     "build-dom-scripts": "tsx lib/dom/genDomScripts.ts",
     "build-types": "tsc --emitDeclarationOnly --outDir dist",
-    "build-js": "tsup lib/index.ts --dts",
-    "build": "pnpm run lint && pnpm run gen-version && pnpm run build-dom-scripts && pnpm run build-js && pnpm run build-types",
-    "gen-version": "tsx scripts/gen-version.ts",
+    "build-js": "tsup",
+    "build": "pnpm run lint && pnpm run build-dom-scripts && pnpm run build-js && pnpm run build-types",
     "prepare": "pnpm run build",
     "lint": "pnpm run prettier:fix && pnpm run eslint",
     "release": "pnpm run build && changeset publish",
     "release-canary": "pnpm run build && changeset version --snapshot && changeset publish --tag alpha"
+  },
+  "pnpm": {
+    "overrides": {
+      "esbuild": "^0.21.4"
+    }
   },
   "files": [
     "dist/**"
@@ -52,6 +56,7 @@
     "cheerio": "^1.0.0",
     "chromium-bidi": "^0.10.0",
     "esbuild": "^0.21.4",
+    "esbuild-plugin-alias": "^0.2.1",
     "eslint": "^9.16.0",
     "express": "^4.21.0",
     "globals": "^15.13.0",

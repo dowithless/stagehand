@@ -1,4 +1,4 @@
-import { StagehandDomProcessError } from "@/types/stagehandErrors";
+import { StagehandDomProcessError } from "../../types/stagehandErrors";
 
 /**
  * Tests if the element actually responds to .scrollTo(...)

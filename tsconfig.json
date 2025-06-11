@@ -8,13 +8,13 @@
     "moduleResolution": "node",
     "sourceMap": true,
     "outDir": "dist",
+    "skipLibCheck": true,
+    "declaration": true,
+    "resolveJsonModule": true,
     "baseUrl": ".",
     "paths": {
-      "*": ["node_modules/*", "lib/types/*"],
       "@/*": ["./*"]
-    },
-    "skipLibCheck": true,
-    "declaration": true
+    }
   },
   "exclude": ["node_modules", "dist", ".eslintrc.cjs"]
 }
