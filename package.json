@@ -8,7 +8,7 @@
   "scripts": {
     "example": "pnpm --filter @browserbasehq/stagehand-examples run start",
     "format": "prettier --write .",
-    "prepack": "pnpm run gen-version && pnpm run build",
+    "prepack": "pnpm run build",
     "prettier": "prettier --check .",
     "prettier:fix": "prettier --write .",
     "eslint": "eslint .",
