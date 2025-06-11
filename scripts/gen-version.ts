@@ -1,28 +1,44 @@
-import { writeFileSync } from "node:fs";
+/* scripts/generate-version.ts */
 import { execSync } from "node:child_process";
-import { resolve } from "node:path";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 
-const pkgRaw = readFileSync(join(__dirname, "..", "package.json"), "utf8");
-const pkgJson = JSON.parse(pkgRaw) as { version: string };
+type Pkg = { version: string; gitHead?: string };
 
-/** Safely run a Git command and return trimmed output or undefined. */
-function git(cmd: string): string | undefined {
+const pkgPath = join(__dirname, "..", "package.json");
+const pkgRaw  = readFileSync(pkgPath, "utf8");
+const pkg     = JSON.parse(pkgRaw) as Pkg;
+
+console.debug("🗂️  package.json.version →", pkg.version);
+console.debug("🗂️  package.json.gitHead →", pkg.gitHead);
+
+function tryGit(cmd: string): string | undefined {
   try {
-    return execSync(cmd).toString().trim() || undefined;
+    const out = execSync(cmd, { stdio: ["ignore", "pipe", "ignore"] })
+      .toString()
+      .trim();
+    return out || undefined;
   } catch {
     return undefined;
   }
 }
 
-const version = pkgJson.version as string;
-const commit  = git("git rev-parse --short HEAD") ?? "unknown";
-const dirty   = git("git diff --quiet || echo dirty") ? "-dirty" : "";
+/* 1️⃣  env / metadata paths we’ll try in order */
+const commitFromPkg = pkg.gitHead?.slice(0, 9);
+const commitFromEnv = process.env.npm_package_gitHead?.slice(0, 9);
+const commitFromGit = tryGit("git rev-parse --short=9 HEAD");
+const dirtyFlag     = tryGit("git diff --quiet || echo dirty") ? "-dirty" : "";
 
-const fullVersion = `${version}+${commit}${dirty}`;
+/* 2️⃣  log each candidate so you know which one won */
+console.debug("🔍 commitFromPkg →", commitFromPkg);
+console.debug("🔍 commitFromEnv →", commitFromEnv);
+console.debug("🔍 commitFromGit →", commitFromGit);
 
-const file = `/** ⚠️ AUTO-GENERATED — do not edit */
+const commit = commitFromPkg ?? commitFromEnv ?? commitFromGit ?? "unknown";
+
+const fullVersion = `${pkg.version}+${commit}${dirtyFlag}`;
+
+const file = `/** ⚠️  AUTO-GENERATED — DO NOT EDIT */
 export const STAGEHAND_VERSION = "${fullVersion}" as const;
 `;
 
