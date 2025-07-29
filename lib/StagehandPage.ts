@@ -1,10 +1,6 @@
 import { Browserbase } from "@browserbasehq/sdk";
-import type {
-  CDPSession,
-  Page as PlaywrightPage,
-  Frame,
-} from "@playwright/test";
-import { chromium } from "@playwright/test";
+import type { CDPSession, Page as PlaywrightPage, Frame } from "playwright";
+import { chromium } from "playwright";
 import { z } from "zod";
 import { Page, defaultExtractSchema } from "../types/page";
 import {
@@ -32,11 +28,17 @@ import {
   HandlerNotInitializedError,
   StagehandDefaultError,
   ExperimentalApiConflictError,
-  ExperimentalNotConfiguredError,
 } from "../types/stagehandErrors";
 import { StagehandAPIError } from "@/types/stagehandApiErrors";
 import { scriptContent } from "@/lib/dom/build/scriptContent";
 import type { Protocol } from "devtools-protocol";
+
+async function getCurrentRootFrameId(session: CDPSession): Promise<string> {
+  const { frameTree } = (await session.send(
+    "Page.getFrameTree",
+  )) as Protocol.Page.GetFrameTreeResponse;
+  return frameTree.frame.id;
+}
 
 export class StagehandPage {
   private stagehand: Stagehand;
@@ -59,6 +61,16 @@ export class StagehandPage {
   private fidOrdinals: Map<string | undefined, number> = new Map([
     [undefined, 0],
   ]);
+
+  private rootFrameId!: string;
+
+  public get frameId(): string {
+    return this.rootFrameId;
+  }
+
+  public updateRootFrameId(newId: string): void {
+    this.rootFrameId = newId;
+  }
 
   constructor(
     page: PlaywrightPage,
@@ -92,11 +104,7 @@ export class StagehandPage {
         const value = target[prop];
         // If the property is a function, wrap it to update active page before execution
         if (typeof value === "function" && prop !== "on") {
-          return (...args: unknown[]) => {
-            // Update active page before executing the method
-            this.intContext.setActivePage(this);
-            return value.apply(target, args);
-          };
+          return (...args: unknown[]) => value.apply(target, args);
         }
         return value;
       },
@@ -192,7 +200,7 @@ ${scriptContent} \
     }
 
     const browserbase = new Browserbase({
-      apiKey: process.env.BROWSERBASE_API_KEY,
+      apiKey: this.stagehand["apiKey"] ?? process.env.BROWSERBASE_API_KEY,
     });
 
     const sessionStatus = await browserbase.sessions.retrieve(sessionId);
@@ -213,14 +221,6 @@ ${scriptContent} \
 
     this.intPage = newStagehandPage.page;
 
-    if (this.stagehand.debugDom) {
-      this.stagehand.log({
-        category: "deprecation",
-        message:
-          "Warning: debugDom is not supported in this version of Stagehand",
-        level: 1,
-      });
-    }
     await this.intPage.waitForLoadState("domcontentloaded");
     await this._waitForSettledDom();
   }
@@ -299,7 +299,6 @@ ${scriptContent} \
             prop === "$$eval"
           ) {
             return async (...args: unknown[]) => {
-              this.intContext.setActivePage(this);
               // Make sure helpers exist
               await this.ensureStagehandScript();
               return (value as (...a: unknown[]) => unknown).apply(
@@ -328,10 +327,7 @@ ${scriptContent} \
             >;
 
             const method = this[prop as keyof StagehandPage] as EnhancedMethod;
-            return async (options: unknown) => {
-              this.intContext.setActivePage(this);
-              return method.call(this, options);
-            };
+            return (options: unknown) => method.call(this, options);
           }
 
           // Handle screenshots with CDP
@@ -374,9 +370,11 @@ ${scriptContent} \
             const rawGoto: typeof target.goto =
               Object.getPrototypeOf(target).goto.bind(target);
             return async (url: string, options: GotoOptions) => {
-              this.intContext.setActivePage(this);
               const result = this.api
-                ? await this.api.goto(url, options)
+                ? await this.api.goto(url, {
+                    ...options,
+                    frameId: this.rootFrameId,
+                  })
                 : await rawGoto(url, options);
 
               this.stagehand.addToHistory("navigate", { url, options }, result);
@@ -437,15 +435,19 @@ ${scriptContent} \
 
           // For all other method calls, update active page
           if (typeof value === "function") {
-            return (...args: unknown[]) => {
-              this.intContext.setActivePage(this);
-              return value.apply(target, args);
-            };
+            return (...args: unknown[]) => value.apply(target, args);
           }
 
           return value;
         },
       };
+
+      const session = await this.getCDPClient(this.rawPage);
+      await session.send("Page.enable");
+
+      const rootId = await getCurrentRootFrameId(session);
+      this.updateRootFrameId(rootId);
+      this.intContext.registerFrameId(rootId, this);
 
       this.intPage = new Proxy(page, handler) as unknown as Page;
       this.initialized = true;
@@ -470,9 +472,9 @@ ${scriptContent} \
    * `_waitForSettledDom` waits until the DOM is settled, and therefore is
    * ready for actions to be taken.
    *
-   * **Definition of “settled”**
+   * **Definition of "settled"**
    *   • No in-flight network requests (except WebSocket / Server-Sent-Events).
-   *   • That idle state lasts for at least **500 ms** (the “quiet-window”).
+   *   • That idle state lasts for at least **500 ms** (the "quiet-window").
    *
    * **How it works**
    *   1.  Subscribes to CDP Network and Page events for the main target and all
@@ -511,6 +513,10 @@ ${scriptContent} \
       autoAttach: true,
       waitForDebuggerOnStart: false,
       flatten: true,
+      filter: [
+        { type: "worker", exclude: true },
+        { type: "shared_worker", exclude: true },
+      ],
     });
 
     return new Promise<void>((resolve) => {
@@ -640,15 +646,15 @@ ${scriptContent} \
       // If actionOrOptions is an ObserveResult, we call actFromObserveResult.
       // We need to ensure there is both a selector and a method in the ObserveResult.
       if (typeof actionOrOptions === "object" && actionOrOptions !== null) {
-        if ("iframes" in actionOrOptions && !this.stagehand.experimental) {
-          throw new ExperimentalNotConfiguredError("iframes");
-        }
         // If it has selector AND method => treat as ObserveResult
         if ("selector" in actionOrOptions && "method" in actionOrOptions) {
           const observeResult = actionOrOptions as ObserveResult;
 
           if (this.api) {
-            const result = await this.api.act(observeResult);
+            const result = await this.api.act({
+              ...observeResult,
+              frameId: this.rootFrameId,
+            });
             await this._refreshPageFromAPI();
             this.stagehand.addToHistory("act", observeResult, result);
             return result;
@@ -680,7 +686,8 @@ ${scriptContent} \
       const { action, modelName, modelClientOptions } = actionOrOptions;
 
       if (this.api) {
-        const result = await this.api.act(actionOrOptions);
+        const opts = { ...actionOrOptions, frameId: this.rootFrameId };
+        const result = await this.api.act(opts);
         await this._refreshPageFromAPI();
         this.stagehand.addToHistory("act", actionOrOptions, result);
         return result;
@@ -741,7 +748,7 @@ ${scriptContent} \
       if (!instructionOrOptions) {
         let result: ExtractResult<T>;
         if (this.api) {
-          result = await this.api.extract<T>({});
+          result = await this.api.extract<T>({ frameId: this.rootFrameId });
         } else {
           result = await this.extractHandler.extract();
         }
@@ -755,7 +762,12 @@ ${scriptContent} \
               instruction: instructionOrOptions,
               schema: defaultExtractSchema as T,
             }
-          : instructionOrOptions;
+          : instructionOrOptions.schema
+            ? instructionOrOptions
+            : {
+                ...instructionOrOptions,
+                schema: defaultExtractSchema as T,
+              };
 
       const {
         instruction,
@@ -768,12 +780,9 @@ ${scriptContent} \
         iframes,
       } = options;
 
-      if (iframes !== undefined && !this.stagehand.experimental) {
-        throw new ExperimentalNotConfiguredError("iframes");
-      }
-
       if (this.api) {
-        const result = await this.api.extract<T>(options);
+        const opts = { ...options, frameId: this.rootFrameId };
+        const result = await this.api.extract<T>(opts);
         this.stagehand.addToHistory("extract", instructionOrOptions, result);
         return result;
       }
@@ -875,12 +884,9 @@ ${scriptContent} \
         iframes,
       } = options;
 
-      if (iframes !== undefined && !this.stagehand.experimental) {
-        throw new ExperimentalNotConfiguredError("iframes");
-      }
-
       if (this.api) {
-        const result = await this.api.observe(options);
+        const opts = { ...options, frameId: this.rootFrameId };
+        const result = await this.api.observe(opts);
         this.stagehand.addToHistory("observe", instructionOrOptions, result);
         return result;
       }
@@ -990,7 +996,7 @@ ${scriptContent} \
       if (msg.includes("does not have a separate CDP session")) {
         // Re-use / create the top-level session instead
         const rootSession = await this.getCDPClient(this.page);
-        // cache the alias so we don’t try again for this frame
+        // cache the alias so we don't try again for this frame
         this.cdpClients.set(target, rootSession);
         return rootSession;
       }

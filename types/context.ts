@@ -1,7 +1,4 @@
-import type {
-  BrowserContext as PlaywrightContext,
-  Frame,
-} from "@playwright/test";
+import type { BrowserContext as PlaywrightContext, Frame } from "playwright";
 import { Page } from "../types/page";
 
 export interface AXNode {
@@ -108,6 +105,7 @@ export interface CombinedA11yResult {
 }
 
 export interface FrameSnapshot {
+  frame: Frame;
   tree: string;
   xpathMap: Record<EncodedId, string>;
   urlMap: Record<EncodedId, string>;

@@ -4,7 +4,7 @@ import { LLMProvider } from "../lib/llm/LLMProvider";
 import { LogLine } from "./log";
 import { AvailableModel, ClientOptions } from "./model";
 import { LLMClient } from "../lib/llm/LLMClient";
-import { Cookie } from "@playwright/test";
+import { Cookie } from "playwright";
 import { AgentProviderType } from "./agent";
 
 export interface ConstructorParams {
@@ -116,6 +116,7 @@ export interface ActOptions {
   domSettleTimeoutMs?: number;
   timeoutMs?: number;
   iframes?: boolean;
+  frameId?: string;
 }
 
 export interface ActResult {
@@ -136,6 +137,7 @@ export interface ExtractOptions<T extends z.AnyZodObject> {
   useTextExtract?: boolean;
   selector?: string;
   iframes?: boolean;
+  frameId?: string;
 }
 
 export type ExtractResult<T extends z.AnyZodObject> = z.infer<T>;
@@ -152,6 +154,7 @@ export interface ObserveOptions {
   onlyVisible?: boolean;
   drawOverlay?: boolean;
   iframes?: boolean;
+  frameId?: string;
 }
 
 export interface ObserveResult {
@@ -181,6 +184,7 @@ export interface LocalBrowserLaunchOptions {
   };
   tracesDir?: string;
   userDataDir?: string;
+  preserveUserDataDir?: boolean;
   acceptDownloads?: boolean;
   downloadsPath?: string;
   extraHTTPHeaders?: Record<string, string>;

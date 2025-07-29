@@ -3,7 +3,7 @@ import { Stagehand, StagehandFunctionName } from "../index";
 import { observe } from "../inference";
 import { LLMClient } from "../llm/LLMClient";
 import { StagehandPage } from "../StagehandPage";
-import { drawObserveOverlay } from "../utils";
+import { drawObserveOverlay, trimTrailingTextNode } from "../utils";
 import {
   getAccessibilityTree,
   getAccessibilityTreeWithFrames,
@@ -151,42 +151,67 @@ export class StagehandObserveHandler {
       });
     }
 
-    const elementsWithSelectors = await Promise.all(
-      observationResponse.elements.map(async (element) => {
-        const { elementId, ...rest } = element;
+    const elementsWithSelectors = (
+      await Promise.all(
+        observationResponse.elements.map(async (element) => {
+          const { elementId, ...rest } = element;
 
-        // Generate xpath for the given element if not found in selectorMap
-        this.logger({
-          category: "observation",
-          message: "Getting xpath for element",
-          level: 1,
-          auxiliary: {
-            elementId: {
-              value: elementId.toString(),
-              type: "string",
-            },
-          },
-        });
-
-        const lookUpIndex = elementId as EncodedId;
-        const xpath = combinedXpathMap[lookUpIndex];
-
-        if (!xpath || xpath === "") {
+          // Generate xpath for the given element if not found in selectorMap
           this.logger({
             category: "observation",
-            message: `Empty xpath returned for element: ${elementId}`,
+            message: "Getting xpath for element",
             level: 1,
+            auxiliary: {
+              elementId: {
+                value: elementId.toString(),
+                type: "string",
+              },
+            },
           });
-        }
 
-        return {
-          ...rest,
-          selector: `xpath=${xpath}`,
-          // Provisioning or future use if we want to use direct CDP
-          // backendNodeId: elementId,
-        };
-      }),
-    );
+          if (elementId.includes("-")) {
+            const lookUpIndex = elementId as EncodedId;
+            const xpath: string | undefined = combinedXpathMap[lookUpIndex];
+
+            const trimmedXpath = trimTrailingTextNode(xpath);
+
+            if (!trimmedXpath || trimmedXpath === "") {
+              this.logger({
+                category: "observation",
+                message: `Empty xpath returned for element`,
+                auxiliary: {
+                  observeResult: {
+                    value: JSON.stringify(element),
+                    type: "object",
+                  },
+                },
+                level: 1,
+              });
+              return undefined;
+            }
+
+            return {
+              ...rest,
+              selector: `xpath=${trimmedXpath}`,
+              // Provisioning or future use if we want to use direct CDP
+              // backendNodeId: elementId,
+            };
+          } else {
+            this.logger({
+              category: "observation",
+              message: `Element is inside a shadow DOM: ${elementId}`,
+              level: 0,
+            });
+            return {
+              description: "an element inside a shadow DOM",
+              method: "not-supported",
+              arguments: [] as string[],
+              selector: "not-supported",
+            };
+          }
+        }),
+      )
+    ).filter(<T>(e: T | undefined): e is T => e !== undefined);
 
     this.logger({
       category: "observation",

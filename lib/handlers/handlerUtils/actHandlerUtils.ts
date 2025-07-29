@@ -1,4 +1,4 @@
-import { Page, Locator, FrameLocator } from "@playwright/test";
+import { Page, Locator, FrameLocator } from "playwright";
 import { PlaywrightCommandException } from "../../../types/playwright";
 import { StagehandPage } from "../../StagehandPage";
 import { getNodeFromXpath } from "@/lib/dom/utils";
@@ -8,12 +8,8 @@ import { StagehandClickError } from "@/types/stagehandErrors";
 
 const IFRAME_STEP_RE = /^iframe(\[[^\]]+])?$/i;
 
-export function deepLocator(
-  root: Page | FrameLocator,
-  rawXPath: string,
-): Locator {
-  // 1 ─ strip optional 'xpath=' prefix and whitespace
-  let xpath = rawXPath.replace(/^xpath=/i, "").trim();
+export function deepLocator(root: Page | FrameLocator, xpath: string): Locator {
+  // 1 ─ prepend with slash if not already included
   if (!xpath.startsWith("/")) xpath = "/" + xpath;
 
   // 2 ─ split into steps, accumulate until we hit an iframe step
@@ -59,6 +55,7 @@ export const methodHandlerMap: Record<
   click: clickElement,
   nextChunk: scrollToNextChunk,
   prevChunk: scrollToPreviousChunk,
+  selectOptionFromDropdown: selectOption,
 };
 
 export async function scrollToNextChunk(ctx: MethodHandlerContext) {
@@ -78,8 +75,7 @@ export async function scrollToNextChunk(ctx: MethodHandlerContext) {
       ({ xpath }) => {
         const elementNode = getNodeFromXpath(xpath);
         if (!elementNode || elementNode.nodeType !== Node.ELEMENT_NODE) {
-          console.warn(`Could not locate element to scroll by its height.`);
-          return Promise.resolve();
+          throw Error(`Could not locate element to scroll on.`);
         }
 
         const element = elementNode as HTMLElement;
@@ -142,8 +138,7 @@ export async function scrollToPreviousChunk(ctx: MethodHandlerContext) {
       ({ xpath }) => {
         const elementNode = getNodeFromXpath(xpath);
         if (!elementNode || elementNode.nodeType !== Node.ELEMENT_NODE) {
-          console.warn(`Could not locate element to scroll by its height.`);
-          return Promise.resolve();
+          throw Error(`Could not locate element to scroll on.`);
         }
 
         const element = elementNode as HTMLElement;
@@ -245,8 +240,7 @@ export async function scrollElementToPercentage(ctx: MethodHandlerContext) {
 
         const elementNode = getNodeFromXpath(xpath);
         if (!elementNode || elementNode.nodeType !== Node.ELEMENT_NODE) {
-          console.warn(`Could not locate element to scroll on.`);
-          return;
+          throw Error(`Could not locate element to scroll on.`);
         }
 
         const element = elementNode as HTMLElement;
@@ -349,6 +343,26 @@ export async function pressKey(ctx: MethodHandlerContext) {
   }
 }
 
+export async function selectOption(ctx: MethodHandlerContext) {
+  const { locator, xpath, args, logger } = ctx;
+  try {
+    const text = args[0]?.toString() || "";
+    await locator.selectOption(text, { timeout: 5000 });
+  } catch (e) {
+    logger({
+      category: "action",
+      message: "error selecting option",
+      level: 0,
+      auxiliary: {
+        error: { value: e.message, type: "string" },
+        trace: { value: e.stack, type: "string" },
+        xpath: { value: xpath, type: "string" },
+      },
+    });
+    throw new PlaywrightCommandException(e.message);
+  }
+}
+
 export async function clickElement(ctx: MethodHandlerContext) {
   const {
     locator,
@@ -373,13 +387,11 @@ export async function clickElement(ctx: MethodHandlerContext) {
   });
 
   try {
-    await locator.evaluate((el) => {
-      (el as HTMLElement).click();
-    });
+    await locator.click({ timeout: 3_500 });
   } catch (e) {
     logger({
       category: "action",
-      message: "error performing click",
+      message: "Playwright click failed, falling back to JS click",
       level: 1,
       auxiliary: {
         error: { value: e.message, type: "string" },
@@ -389,7 +401,26 @@ export async function clickElement(ctx: MethodHandlerContext) {
         args: { value: JSON.stringify(args), type: "object" },
       },
     });
-    throw new StagehandClickError(xpath, e.message);
+
+    try {
+      await locator.evaluate((el) => (el as HTMLElement).click(), undefined, {
+        timeout: 3_500,
+      });
+    } catch (e) {
+      logger({
+        category: "action",
+        message: "error performing click (JS fallback)",
+        level: 0,
+        auxiliary: {
+          error: { value: e.message, type: "string" },
+          trace: { value: e.stack, type: "string" },
+          xpath: { value: xpath, type: "string" },
+          method: { value: "click", type: "string" },
+          args: { value: JSON.stringify(args), type: "object" },
+        },
+      });
+      throw new StagehandClickError(xpath, e.message);
+    }
   }
 
   await handlePossiblePageNavigation(
@@ -485,8 +516,6 @@ async function handlePossiblePageNavigation(
         url: { value: newOpenedTab.url(), type: "string" },
       },
     });
-    await newOpenedTab.close();
-    await stagehandPage.page.goto(newOpenedTab.url());
     await stagehandPage.page.waitForLoadState("domcontentloaded");
   }
 
